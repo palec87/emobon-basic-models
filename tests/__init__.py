@@ -1,1 +1,1 @@
-"""Tests for mgnify-methods package."""
+"""Tests for emo-bon models package."""

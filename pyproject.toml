@@ -1,13 +1,18 @@
 [project]
-name = "mgnify-methods"
+name = "emobon-models"
 version = "0.1.0"
-description = "Support methods and classes for the Biodiversity studies on Mgnify metagenomes"
+description = "Basic models for emobon tables"
 readme = "README.md"
 authors = [
     { name = "palec87", email = "palec87@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "ipykernel>=7.2.0",
+    "marine-omics>=0.1.20",
+    "pandas<3.0.0",
+    "py-udal-mgo @ git+https://github.com/fair-ease/py-udal-mgo.git",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -26,6 +31,12 @@ docs = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/emobon-models"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
