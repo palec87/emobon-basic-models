@@ -1,0 +1,91 @@
+{
+  "output": {
+    "use_timestamp": true,
+    "cache_dir": "analysis_cache"
+  },
+  "taxonomy": {
+    "ranks": [
+      "superkingdom",
+      "kingdom",
+      "phylum",
+      "class",
+      "order",
+      "family",
+      "genus",
+      "species"
+    ],
+    "indicators": {
+      "superkingdom": "sk__",
+      "kingdom": "k__",
+      "phylum": "p__",
+      "class": "c__",
+      "order": "o__",
+      "family": "f__",
+      "genus": "g__",
+      "species": "s__"
+    },
+    "analysis_level": "phylum"
+  },
+  "samples": {
+    "sample_type": "prok"
+  },
+  "precompute": {
+    "loading": true,
+    "saving": true,
+    "tag": "small"
+  },
+  "transform": {
+    "enabled": true,
+    "method": "clr",
+    "params": {
+      "pseudo_count": 1e-09
+    },
+    "method_params": {
+      "alr": {
+        "reference_feature": "taxon_1"
+      },
+      "ilr": {
+        "basis": "sbp"
+      },
+      "plr": {
+        "lambda": 0.5
+      }
+    }
+  },
+  "preprocessing": {
+    "prevalence_cutoff": 0.5,
+    "dropna": false
+  },
+  "differential_abundance": {
+    "enabled": true,
+    "method": "deseq2",
+    "params": {
+      "deseq2": {
+        "design_factors": [
+          "study_tag",
+          "season",
+          "latitude"
+        ],
+        "min_counts": 1000,
+        "padj": 0.05,
+        "lfc": null,
+        "n_cpus": 8
+      }
+    }
+  },
+  "feature": "study_tag",
+  "plots": {
+    "reads_histogram": false,
+    "taxonomic_overlap_venn": true,
+    "rarefaction_curves": true,
+    "rarefaction_mean_std": true,
+    "rarefaction_mean_ci": true,
+    "rarefaction_individual": false,
+    "alpha_diversity": true,
+    "beta_diversity_pcoa": true,
+    "taxa_prevalence_violin": true,
+    "feature_rarefaction": true,
+    "save_figures": true,
+    "dpi": 300
+  }
+}

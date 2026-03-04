@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "ipykernel>=7.2.0",
     "marine-omics>=0.1.20",
+    "mgnify-methods>=0.1.0",
     "pandas<3.0.0",
     "py-udal-mgo @ git+https://github.com/fair-ease/py-udal-mgo.git",
 ]
