@@ -1,26 +1,26 @@
-# [Package name]
+# emobon-models
 
-:: short description::
+Basic models for EMOBON metadata and abundance tables.
 
 ## Installation
 
 ### Using uv (recommended)
 
 ```bash
-uv add mgnify-methods
+uv add emobon-models
 ```
 
 ### Using pip
 
 ```bash
-pip install mgnify-methods
+pip install emobon-models
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/palec87/mgnify-methods.git
-cd mgnify-methods
+git clone https://github.com/palec87/emobon-models.git
+cd emobon-models
 uv sync
 ```
 
@@ -70,7 +70,7 @@ Run `make help` to see all available targets.
 
 ## Documentation
 
-Documentation is available at [ReadTheDocs](https://mgnify-methods.readthedocs.io/) (once deployed).
+Documentation is available at ReadTheDocs (once deployed).
 
 ## License
 

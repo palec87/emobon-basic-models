@@ -1,6 +1,6 @@
-# mgnify-methods Documentation
+# emobon-models Documentation
 
-Welcome to the documentation for mgnify-methods.
+Welcome to the documentation for emobon-models.
 
 ## Overview
 
