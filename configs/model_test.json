@@ -58,6 +58,7 @@
   },
   "feature": "observatory ID",
   "modeling": {
+    "model_type": "ridge",
     "metadata_cols": [
       "observatory ID",
       "month name",
@@ -84,9 +85,37 @@
       "max_depth": null,
       "min_samples_leaf": 1
     },
+    "ridge": {
+      "alpha": 1.0,
+      "fit_intercept": false,
+      "copy_X": true,
+      "max_iter": null,
+      "tol": 0.0001,
+      "solver": "auto",
+      "positive": false,
+      "random_state": null
+    },
+    "pls": {
+      "n_components": 15,
+      "scale": true,
+      "max_iter": 2000,
+      "tol": 0.000001,
+      "copy": true
+    },
+    "elasticnet": {
+      "alpha": 2.0,
+      "l1_ratio": 0.05,
+      "fit_intercept": false,
+      "copy_X": true,
+      "max_iter": 2000,
+      "tol": 0.0001,
+      "warm_start": false,
+      "random_state": null,
+      "selection": "cyclic"
+    },
     "mlflow": {
       "tracking_uri": null,
-      "experiment_name": "emobon-rf-loocv",
+      "experiment_name": "emobon-ridge-loocv",
       "run_name": "filtered_metadata"
     }
   },

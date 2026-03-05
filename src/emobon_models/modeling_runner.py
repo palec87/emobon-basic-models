@@ -1,4 +1,4 @@
-"""Training and evaluation utilities for EMOBON random-forest models."""
+"""Training and evaluation utilities for EMOBON regression models."""
 
 from pathlib import Path
 import tempfile
@@ -11,17 +11,29 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import MultiTaskElasticNet
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import mean_squared_error
+from sklearn.cross_decomposition import PLSRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import StandardScaler
 
 from emobon_models.modeling_config import ModelingConfig
 from emobon_models.modeling_data import ModelingDataset
 from emobon_models.modeling_data import prepare_modeling_dataset
 
 
-def _build_preprocessor(metadata: pd.DataFrame) -> ColumnTransformer:
+def _standardize_numeric_features(config: ModelingConfig) -> bool:
+    """Return whether numeric metadata features should be standardized."""
+    return config.model_type in {"ridge", "pls", "elasticnet"}
+
+
+def _build_preprocessor(
+    metadata: pd.DataFrame,
+    config: ModelingConfig,
+) -> ColumnTransformer:
     """Build preprocessing pipeline for numeric and categorical data."""
     numeric_columns = metadata.select_dtypes(
         include=["number", "bool"]
@@ -30,11 +42,13 @@ def _build_preprocessor(metadata: pd.DataFrame) -> ColumnTransformer:
         exclude=["number", "bool"]
     ).columns
 
-    numeric_pipeline = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-        ]
-    )
+    numeric_steps: list[tuple[str, Any]] = [
+        ("imputer", SimpleImputer(strategy="median")),
+    ]
+    if _standardize_numeric_features(config):
+        numeric_steps.append(("scaler", StandardScaler()))
+
+    numeric_pipeline = Pipeline(steps=numeric_steps)
     categorical_pipeline = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -58,15 +72,51 @@ def _build_pipeline(
     config: ModelingConfig,
 ) -> Pipeline:
     """Build full model pipeline for multi-output abundance prediction."""
-    preprocessor = _build_preprocessor(metadata)
-    model = RandomForestRegressor(
-        n_estimators=config.n_estimators,
-        random_state=config.random_state,
-        n_jobs=config.n_jobs,
-        max_depth=config.max_depth,
-        min_samples_leaf=config.min_samples_leaf,
-    )
+    preprocessor = _build_preprocessor(metadata, config)
+    model = _build_model(config)
     return Pipeline(steps=[("preprocessor", preprocessor), ("model", model)])
+
+
+def _build_model(config: ModelingConfig) -> Any:
+    """Build selected estimator based on configured model type."""
+    if config.model_type == "random_forest":
+        rf_params = dict(config.random_forest_params or {})
+        return RandomForestRegressor(**rf_params)
+
+    if config.model_type == "ridge":
+        ridge_params = dict(config.ridge_params or {})
+        return Ridge(**ridge_params)
+
+    if config.model_type == "pls":
+        pls_params = dict(config.pls_params or {})
+        return PLSRegression(**pls_params)
+
+    if config.model_type == "elasticnet":
+        elasticnet_params = dict(config.elasticnet_params or {})
+        return MultiTaskElasticNet(**elasticnet_params)
+
+    msg = f"Unsupported model_type: {config.model_type}"
+    raise ValueError(msg)
+
+
+def _active_model_params(config: ModelingConfig) -> dict[str, Any]:
+    """Return MLflow params for the active model only."""
+    if config.model_type == "random_forest":
+        model_params = dict(config.random_forest_params or {})
+    elif config.model_type == "ridge":
+        model_params = dict(config.ridge_params or {})
+    elif config.model_type == "pls":
+        model_params = dict(config.pls_params or {})
+    elif config.model_type == "elasticnet":
+        model_params = dict(config.elasticnet_params or {})
+    else:
+        msg = f"Unsupported model_type: {config.model_type}"
+        raise ValueError(msg)
+
+    prefixed_params: dict[str, Any] = {}
+    for key, value in model_params.items():
+        prefixed_params[f"{config.model_type}__{key}"] = value
+    return prefixed_params
 
 
 def _group_loocv_masks(
@@ -104,18 +154,43 @@ def _fold_metrics(
 def _feature_importance_table(
     fitted_pipeline: Pipeline,
 ) -> pd.DataFrame:
-    """Build feature-importance table using transformed feature space."""
+    """Build feature-stat table using importances or model coefficients."""
     preprocessor: ColumnTransformer = fitted_pipeline.named_steps[
         "preprocessor"
     ]
-    model: RandomForestRegressor = fitted_pipeline.named_steps["model"]
+    model = fitted_pipeline.named_steps["model"]
 
     feature_names = preprocessor.get_feature_names_out()
-    importances = model.feature_importances_
+
+    if hasattr(model, "feature_importances_"):
+        importances = np.asarray(model.feature_importances_)
+        stat_type = "importance"
+    elif hasattr(model, "coef_"):
+        coef = np.asarray(model.coef_)
+        if coef.ndim == 1:
+            importances = np.abs(coef)
+        elif coef.ndim == 2:
+            feature_count = len(feature_names)
+            if coef.shape[0] == feature_count:
+                importances = np.abs(coef).mean(axis=1)
+            elif coef.shape[1] == feature_count:
+                importances = np.abs(coef).mean(axis=0)
+            else:
+                msg = "Unable to align coefficient shape with feature names"
+                raise ValueError(msg)
+        else:
+            msg = "Unsupported coefficient array shape"
+            raise ValueError(msg)
+        stat_type = "coef_abs_mean"
+    else:
+        msg = "Model does not expose feature_importances_ or coef_"
+        raise ValueError(msg)
+
     return pd.DataFrame(
         {
             "feature": feature_names,
             "importance": importances,
+            "stat_type": stat_type,
         }
     ).sort_values("importance", ascending=False)
 
@@ -223,13 +298,10 @@ def run_group_loocv_with_mlflow(
     with mlflow.start_run(run_name=config.mlflow_run_name):
         mlflow.log_params(
             {
+                "model_type": config.model_type,
                 "feature_column": config.feature_column,
                 "missing_column_threshold": config.missing_column_threshold,
-                "n_estimators": config.n_estimators,
-                "random_state": config.random_state,
-                "n_jobs": config.n_jobs,
-                "max_depth": config.max_depth,
-                "min_samples_leaf": config.min_samples_leaf,
+                **_active_model_params(config),
             }
         )
 
