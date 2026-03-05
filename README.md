@@ -16,8 +16,8 @@ tracking, optional hyperparameter tuning, and post-run evaluation plots.
 ### Clone and install
 
 ```bash
-git clone https://github.com/palec87/emobon-models.git
-cd emobon-models
+git clone https://github.com/palec87/emobon-basic-models.git
+cd emobon-basic-models
 uv sync --extra dev --extra docs
 ```
 
