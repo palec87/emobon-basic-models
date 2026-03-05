@@ -4,7 +4,12 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from mgnify_methods.utils.logging import get_logger
+
 from emobon_models.modeling_config import ModelingConfig
+
+
+logger = get_logger(__name__, level="INFO")
 
 
 @dataclass(slots=True)
@@ -55,10 +60,16 @@ def _align_abundance_by_samples(
     """Align abundance orientation so sample identifiers are on index."""
     index_overlap = metadata.index.intersection(abundance.index)
     if not index_overlap.empty:
+        logger.info("Detected abundance samples on index (%d matches)",
+                    len(index_overlap))
         return abundance
 
     column_overlap = metadata.index.intersection(abundance.columns)
     if not column_overlap.empty:
+        logger.info(
+            "Detected abundance samples on columns (%d matches); transposing",
+            len(column_overlap),
+        )
         return abundance.transpose(copy=False)
 
     msg = (
@@ -89,6 +100,7 @@ def prepare_modeling_dataset(
     config: ModelingConfig,
 ) -> ModelingDataset:
     """Align metadata and abundance tables and apply modeling filters."""
+    logger.info("Preparing modeling dataset")
     metadata = _with_sample_index(metadata_df, config.sample_id_column)
     abundance = abundance_df.copy()
 
@@ -109,6 +121,10 @@ def prepare_modeling_dataset(
 
     metadata = metadata.loc[shared_ids]
     abundance = abundance.loc[shared_ids]
+    logger.info(
+        "Aligned metadata and abundance to %d shared samples",
+        len(shared_ids),
+    )
 
     if config.feature_column not in metadata.columns:
         msg = (
@@ -124,12 +140,23 @@ def prepare_modeling_dataset(
         metadata,
         config.missing_column_threshold,
     )
+    if dropped:
+        logger.info(
+            "Dropped %d metadata columns above missing threshold",
+            len(dropped),
+        )
 
     if filtered_metadata.empty or abundance.empty:
         msg = "No rows available after metadata and abundance alignment"
         raise ValueError(msg)
 
     groups = filtered_metadata[config.feature_column].astype("string")
+    logger.info(
+        "Prepared dataset shapes: metadata=%s abundance=%s groups=%d",
+        filtered_metadata.shape,
+        abundance.shape,
+        groups.nunique(dropna=False),
+    )
     return ModelingDataset(
         metadata=filtered_metadata,
         abundance=abundance,

@@ -5,6 +5,11 @@ from typing import Any
 from typing import Literal
 from typing import Mapping
 
+from mgnify_methods.utils.logging import get_logger
+
+
+logger = get_logger(__name__, level="INFO")
+
 
 ModelType = Literal[
     "random_forest",
@@ -34,6 +39,17 @@ class ModelingConfig:
     ridge_params: dict[str, Any] | None = None
     pls_params: dict[str, Any] | None = None
     elasticnet_params: dict[str, Any] | None = None
+
+    tuning_enabled: bool = False
+    tuning_method: str = "grid_search"
+    tuning_scoring: str = "neg_mean_squared_error"
+    tuning_n_jobs: int = -1
+    tuning_refit: bool = True
+    tuning_error_score: str | float = "raise"
+    tuning_verbose: int = 0
+    tuning_inner_cv_folds: int = 3
+    tuning_max_candidates: int = 10
+    tuning_grids: dict[str, dict[str, list[Any]]] | None = None
 
     mlflow_tracking_uri: str | None = None
     mlflow_experiment_name: str = "emobon-rf-loocv"
@@ -69,8 +85,49 @@ def _mapping_to_dict(mapping: Mapping[str, Any] | None) -> dict[str, Any]:
     return dict(mapping)
 
 
+def _normalize_tuning_grids(
+    tuning_grids: Mapping[str, Any] | None,
+) -> dict[str, dict[str, list[Any]]]:
+    """Normalize tuning grids to {model: {param: [values]}} format."""
+    if tuning_grids is None:
+        return {}
+
+    normalized: dict[str, dict[str, list[Any]]] = {}
+    for model_name, raw_grid in dict(tuning_grids).items():
+        if not isinstance(raw_grid, Mapping):
+            msg = f"Tuning grid for '{model_name}' must be a mapping"
+            raise ValueError(msg)
+
+        model_grid: dict[str, list[Any]] = {}
+        for param_name, param_values in dict(raw_grid).items():
+            if isinstance(param_values, list):
+                values = param_values
+            else:
+                values = [param_values]
+            if not values:
+                msg = (
+                    f"Tuning grid parameter '{param_name}' for "
+                    f"'{model_name}' cannot be empty"
+                )
+                raise ValueError(msg)
+            model_grid[str(param_name)] = values
+
+        normalized[str(model_name)] = model_grid
+
+    return normalized
+
+
+def _validate_tuning_method(method: str) -> str:
+    """Validate requested tuning method."""
+    if method != "grid_search":
+        msg = f"Unsupported tuning method '{method}'"
+        raise ValueError(msg)
+    return method
+
+
 def modeling_config_from_analysis(config: Mapping[str, Any]) -> ModelingConfig:
     """Build modeling config from the notebook analysis configuration."""
+    logger.info("Building ModelingConfig from analysis config")
     feature_column = str(config["feature"])
     modeling_section = dict(config.get("modeling", {}))
 
@@ -85,7 +142,43 @@ def modeling_config_from_analysis(config: Mapping[str, Any]) -> ModelingConfig:
     ridge_params = _mapping_to_dict(modeling_section.get("ridge"))
     pls_params = _mapping_to_dict(modeling_section.get("pls"))
     elasticnet_params = _mapping_to_dict(modeling_section.get("elasticnet"))
+    tuning_section = _mapping_to_dict(modeling_section.get("tuning"))
     mlflow_section = _mapping_to_dict(modeling_section.get("mlflow"))
+
+    tuning_enabled = bool(tuning_section.get("enabled", False))
+    tuning_method = _validate_tuning_method(
+        str(tuning_section.get("method", "grid_search"))
+    )
+    tuning_scoring = str(
+        tuning_section.get("scoring", "neg_mean_squared_error")
+    )
+    tuning_n_jobs = int(tuning_section.get("n_jobs", -1))
+    tuning_refit = bool(tuning_section.get("refit", True))
+    tuning_error_score = tuning_section.get("error_score", "raise")
+    tuning_verbose = int(tuning_section.get("verbose", 0))
+    tuning_inner_cv_folds = int(tuning_section.get("inner_cv_folds", 3))
+    tuning_max_candidates = int(tuning_section.get("max_candidates", 10))
+    tuning_grids = _normalize_tuning_grids(
+        tuning_section.get("grids")
+    )
+
+    if tuning_inner_cv_folds < 2:
+        msg = "modeling.tuning.inner_cv_folds must be >= 2"
+        raise ValueError(msg)
+
+    if tuning_enabled:
+        model_grid = tuning_grids.get(model_type, {})
+        if not model_grid:
+            msg = (
+                "Tuning is enabled but no grid is configured for "
+                f"model_type '{model_type}'"
+            )
+            raise ValueError(msg)
+        logger.info(
+            "Tuning enabled for model '%s' with %d grid params",
+            model_type,
+            len(model_grid),
+        )
 
     default_rf_params: dict[str, Any] = {
         "n_estimators": 500,
@@ -131,7 +224,7 @@ def modeling_config_from_analysis(config: Mapping[str, Any]) -> ModelingConfig:
         **elasticnet_params,
     }
 
-    return ModelingConfig(
+    model_config = ModelingConfig(
         feature_column=feature_column,
         model_type=model_type,
         sample_id_column=modeling_section.get("sample_id_column"),
@@ -145,9 +238,25 @@ def modeling_config_from_analysis(config: Mapping[str, Any]) -> ModelingConfig:
         ridge_params=ridge_full,
         pls_params=pls_full,
         elasticnet_params=elasticnet_full,
+        tuning_enabled=tuning_enabled,
+        tuning_method=tuning_method,
+        tuning_scoring=tuning_scoring,
+        tuning_n_jobs=tuning_n_jobs,
+        tuning_refit=tuning_refit,
+        tuning_error_score=tuning_error_score,
+        tuning_verbose=tuning_verbose,
+        tuning_inner_cv_folds=tuning_inner_cv_folds,
+        tuning_max_candidates=tuning_max_candidates,
+        tuning_grids=tuning_grids,
         mlflow_tracking_uri=mlflow_section.get("tracking_uri"),
         mlflow_experiment_name=str(
             mlflow_section.get("experiment_name", "emobon-rf-loocv")
         ),
         mlflow_run_name=mlflow_section.get("run_name"),
     )
+    logger.info(
+        "Model config ready: model_type=%s, tuning_enabled=%s",
+        model_config.model_type,
+        model_config.tuning_enabled,
+    )
+    return model_config

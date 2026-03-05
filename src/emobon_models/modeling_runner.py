@@ -3,26 +3,28 @@
 from pathlib import Path
 import tempfile
 from typing import Any
-from urllib.parse import unquote
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import MultiTaskElasticNet
-from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_absolute_error
-from sklearn.metrics import mean_squared_error
+from sklearn.linear_model import MultiTaskElasticNet, Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import GridSearchCV, GroupKFold
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from mgnify_methods.utils.logging import get_logger
 
 from emobon_models.modeling_config import ModelingConfig
 from emobon_models.modeling_data import ModelingDataset
 from emobon_models.modeling_data import prepare_modeling_dataset
+
+
+logger = get_logger(__name__, level="INFO")
 
 
 def _standardize_numeric_features(config: ModelingConfig) -> bool:
@@ -41,6 +43,11 @@ def _build_preprocessor(
     categorical_columns = metadata.select_dtypes(
         exclude=["number", "bool"]
     ).columns
+    logger.info(
+        "Building preprocessor: numeric=%d categorical=%d",
+        len(numeric_columns),
+        len(categorical_columns),
+    )
 
     numeric_steps: list[tuple[str, Any]] = [
         ("imputer", SimpleImputer(strategy="median")),
@@ -79,6 +86,7 @@ def _build_pipeline(
 
 def _build_model(config: ModelingConfig) -> Any:
     """Build selected estimator based on configured model type."""
+    logger.info("Building estimator for model_type=%s", config.model_type)
     if config.model_type == "random_forest":
         rf_params = dict(config.random_forest_params or {})
         return RandomForestRegressor(**rf_params)
@@ -117,6 +125,127 @@ def _active_model_params(config: ModelingConfig) -> dict[str, Any]:
     for key, value in model_params.items():
         prefixed_params[f"{config.model_type}__{key}"] = value
     return prefixed_params
+
+
+def _normalize_tuning_grid(
+    model_grid: dict[str, list[Any]],
+) -> dict[str, list[Any]]:
+    """Prefix model hyperparameter grid keys for pipeline search."""
+    normalized: dict[str, list[Any]] = {}
+    for key, values in model_grid.items():
+        search_key = key if "__" in key else f"model__{key}"
+        normalized[search_key] = values
+    return normalized
+
+
+def _count_grid_candidates(model_grid: dict[str, list[Any]]) -> int:
+    """Count number of combinations in a model parameter grid."""
+    total = 1
+    for values in model_grid.values():
+        total *= len(values)
+    return total
+
+
+def _inner_group_splitter(
+    groups: pd.Series,
+    n_splits: int,
+) -> GroupKFold | None:
+    """Build inner group splitter with safe split count from groups."""
+    unique_groups = int(groups.dropna().astype("string").nunique())
+    safe_splits = min(n_splits, unique_groups)
+    if safe_splits < 2:
+        return None
+    return GroupKFold(n_splits=safe_splits)
+
+
+def _fit_pipeline_with_optional_tuning(
+    metadata: pd.DataFrame,
+    config: ModelingConfig,
+    X_train: pd.DataFrame,
+    y_train: pd.DataFrame,
+    train_groups: pd.Series,
+) -> tuple[Pipeline, dict[str, Any], float | None, pd.DataFrame | None]:
+    """Fit pipeline directly or through nested GridSearchCV."""
+    pipeline = _build_pipeline(metadata, config)
+    if not config.tuning_enabled:
+        logger.info("Tuning disabled; fitting pipeline directly")
+        pipeline.fit(X_train, y_train)
+        return pipeline, {}, None, None
+
+    if config.tuning_method != "grid_search":
+        msg = f"Unsupported tuning method: {config.tuning_method}"
+        raise ValueError(msg)
+
+    tuning_grids = dict(config.tuning_grids or {})
+    model_grid = dict(tuning_grids.get(config.model_type, {}))
+    if not model_grid:
+        msg = (
+            "No tuning grid found for model type "
+            f"'{config.model_type}'"
+        )
+        raise ValueError(msg)
+
+    n_candidates = _count_grid_candidates(model_grid)
+    logger.info(
+        "Tuning enabled for %s with %d candidates",
+        config.model_type,
+        n_candidates,
+    )
+    if config.tuning_max_candidates > 0:
+        if n_candidates > config.tuning_max_candidates:
+            msg = (
+                "Grid has more candidates than tuning_max_candidates: "
+                f"{n_candidates} > {config.tuning_max_candidates}"
+            )
+            raise ValueError(msg)
+
+    splitter = _inner_group_splitter(
+        train_groups,
+        config.tuning_inner_cv_folds,
+    )
+    if splitter is None:
+        logger.info("Skipping inner CV tuning due to insufficient groups")
+        pipeline.fit(X_train, y_train)
+        return pipeline, {}, None, None
+
+    search_grid = _normalize_tuning_grid(model_grid)
+    search = GridSearchCV(
+        estimator=pipeline,
+        param_grid=search_grid,
+        scoring=config.tuning_scoring,
+        n_jobs=config.tuning_n_jobs,
+        cv=splitter,
+        refit=config.tuning_refit,
+        error_score=config.tuning_error_score,
+        verbose=config.tuning_verbose,
+    )
+    search.fit(X_train, y_train, groups=train_groups)
+    logger.info(
+        "Grid search done for %s; best_score=%.6f",
+        config.model_type,
+        float(search.best_score_),
+    )
+
+    best_params = {
+        key.replace("model__", "", 1): value
+        for key, value in search.best_params_.items()
+    }
+
+    cv_results = pd.DataFrame(search.cv_results_)
+    keep_columns = [
+        column
+        for column in cv_results.columns
+        if column.startswith("param_")
+        or column in {"mean_test_score", "rank_test_score"}
+    ]
+    cv_summary = cv_results[keep_columns].copy()
+
+    return (
+        search.best_estimator_,
+        best_params,
+        float(search.best_score_),
+        cv_summary,
+    )
 
 
 def _group_loocv_masks(
@@ -260,11 +389,26 @@ def _write_artifacts(
     fold_metrics: pd.DataFrame,
     predictions: pd.DataFrame,
     importances: pd.DataFrame,
+    tuning_best_params: pd.DataFrame | None = None,
+    tuning_cv_scores: pd.DataFrame | None = None,
 ) -> None:
     """Write dataframes to CSV files before MLflow artifact logging."""
+    logger.info("Writing run artifacts to temporary directory: %s", temp_dir)
     fold_metrics.to_csv(temp_dir / "fold_metrics.csv", index=False)
     predictions.to_csv(temp_dir / "fold_predictions.csv", index=False)
     importances.to_csv(temp_dir / "feature_importances.csv", index=False)
+    if tuning_best_params is not None:
+        if not tuning_best_params.empty:
+            tuning_best_params.to_csv(
+                temp_dir / "fold_best_params.csv",
+                index=False,
+            )
+    if tuning_cv_scores is not None:
+        if not tuning_cv_scores.empty:
+            tuning_cv_scores.to_csv(
+                temp_dir / "fold_inner_cv_scores.csv",
+                index=False,
+            )
 
 
 def run_group_loocv_with_mlflow(
@@ -273,6 +417,7 @@ def run_group_loocv_with_mlflow(
     config: ModelingConfig,
 ) -> dict[str, pd.DataFrame | list[str]]:
     """Run group-based LOOCV and log training outputs to MLflow."""
+    logger.info("Starting group-based LOOCV modeling")
     dataset: ModelingDataset = prepare_modeling_dataset(
         metadata_df=metadata_df,
         abundance_df=abundance_df,
@@ -291,9 +436,16 @@ def run_group_loocv_with_mlflow(
         tracking_dir.mkdir(parents=True, exist_ok=True)
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(config.mlflow_experiment_name)
+    logger.info(
+        "MLflow configured: experiment=%s model_type=%s",
+        config.mlflow_experiment_name,
+        config.model_type,
+    )
 
     fold_metrics_rows: list[dict[str, float | int | str]] = []
     prediction_rows: list[pd.DataFrame] = []
+    tuning_best_rows: list[dict[str, Any]] = []
+    tuning_cv_rows: list[pd.DataFrame] = []
 
     with mlflow.start_run(run_name=config.mlflow_run_name):
         mlflow.log_params(
@@ -301,6 +453,10 @@ def run_group_loocv_with_mlflow(
                 "model_type": config.model_type,
                 "feature_column": config.feature_column,
                 "missing_column_threshold": config.missing_column_threshold,
+                "tuning_enabled": config.tuning_enabled,
+                "tuning_method": config.tuning_method,
+                "tuning_inner_cv_folds": config.tuning_inner_cv_folds,
+                "tuning_scoring": config.tuning_scoring,
                 **_active_model_params(config),
             }
         )
@@ -311,12 +467,70 @@ def run_group_loocv_with_mlflow(
             X_test = dataset.metadata.loc[test_mask]
             y_train = dataset.abundance.loc[train_mask]
             y_test = dataset.abundance.loc[test_mask]
+            inner_groups = dataset.groups.loc[train_mask]
+            logger.info(
+                "Fold %d/%d group=%s train=%d test=%d",
+                fold_idx + 1,
+                len(splitter),
+                group_value,
+                int(train_mask.sum()),
+                int(test_mask.sum()),
+            )
 
-            pipeline = _build_pipeline(dataset.metadata, config)
-            pipeline.fit(X_train, y_train)
+            (
+                pipeline,
+                best_params,
+                best_score,
+                cv_summary,
+            ) = _fit_pipeline_with_optional_tuning(
+                metadata=dataset.metadata,
+                config=config,
+                X_train=X_train,
+                y_train=y_train,
+                train_groups=inner_groups,
+            )
             y_pred = pipeline.predict(X_test)
 
+            if best_params:
+                best_row: dict[str, Any] = {
+                    "fold": fold_idx,
+                    "group": group_value,
+                    "best_score": best_score,
+                }
+                best_row.update(best_params)
+                tuning_best_rows.append(best_row)
+
+                for param_key, param_value in best_params.items():
+                    mlflow.log_param(
+                        f"fold_{fold_idx}__best__{param_key}",
+                        param_value,
+                    )
+
+            if best_score is not None:
+                mlflow.log_metric(
+                    "fold_inner_best_score",
+                    best_score,
+                    step=fold_idx,
+                )
+                logger.info(
+                    "Fold %d inner best score: %.6f",
+                    fold_idx,
+                    best_score,
+                )
+
+            if cv_summary is not None:
+                cv_row = cv_summary.copy()
+                cv_row.insert(0, "fold", fold_idx)
+                cv_row.insert(1, "group", group_value)
+                tuning_cv_rows.append(cv_row)
+
             metrics = _fold_metrics(y_test, y_pred)
+            logger.info(
+                "Fold %d metrics: mae=%.6f rmse=%.6f",
+                fold_idx,
+                metrics["mae"],
+                metrics["rmse"],
+            )
             mlflow.log_metrics(
                 {
                     "fold_mae": metrics["mae"],
@@ -378,10 +592,49 @@ def run_group_loocv_with_mlflow(
                 "rmse_mean": float(summary_metrics.iloc[0]["rmse_mean"]),
             }
         )
+        logger.info(
+            "Summary metrics: mae_mean=%.6f rmse_mean=%.6f",
+            float(summary_metrics.iloc[0]["mae_mean"]),
+            float(summary_metrics.iloc[0]["rmse_mean"]),
+        )
 
-        final_pipeline = _build_pipeline(dataset.metadata, config)
-        final_pipeline.fit(dataset.metadata, dataset.abundance)
+        (
+            final_pipeline,
+            final_best_params,
+            final_best_score,
+            _,
+        ) = _fit_pipeline_with_optional_tuning(
+            metadata=dataset.metadata,
+            config=config,
+            X_train=dataset.metadata,
+            y_train=dataset.abundance,
+            train_groups=dataset.groups,
+        )
+
+        if final_best_params:
+            for param_key, param_value in final_best_params.items():
+                mlflow.log_param(
+                    f"final_best__{param_key}",
+                    param_value,
+                )
+        if final_best_score is not None:
+            mlflow.log_metric("final_inner_best_score", final_best_score)
+
         importances_df = _feature_importance_table(final_pipeline)
+        logger.info(
+            "Computed feature statistics table with %d rows",
+            len(importances_df),
+        )
+
+        tuning_best_params_df = pd.DataFrame(tuning_best_rows)
+        if tuning_cv_rows:
+            tuning_cv_scores_df = pd.concat(
+                tuning_cv_rows,
+                axis=0,
+                ignore_index=True,
+            )
+        else:
+            tuning_cv_scores_df = pd.DataFrame()
 
         mlflow.sklearn.log_model(
             sk_model=final_pipeline,
@@ -395,10 +648,20 @@ def run_group_loocv_with_mlflow(
                 fold_metrics=fold_metrics_df,
                 predictions=predictions_df,
                 importances=importances_df,
+                tuning_best_params=tuning_best_params_df,
+                tuning_cv_scores=tuning_cv_scores_df,
             )
             mlflow.log_artifact(str(temp_dir / "fold_metrics.csv"))
             mlflow.log_artifact(str(temp_dir / "fold_predictions.csv"))
             mlflow.log_artifact(str(temp_dir / "feature_importances.csv"))
+            if not tuning_best_params_df.empty:
+                mlflow.log_artifact(str(temp_dir / "fold_best_params.csv"))
+            if not tuning_cv_scores_df.empty:
+                mlflow.log_artifact(
+                    str(temp_dir / "fold_inner_cv_scores.csv")
+                )
+
+    logger.info("Completed LOOCV run successfully")
 
     return {
         "fold_metrics": fold_metrics_df,

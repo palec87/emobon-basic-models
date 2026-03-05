@@ -2,11 +2,16 @@ from pathlib import Path
 import pickle
 from typing import Any
 import mgnify_methods.paper_modules as pm
+from mgnify_methods.utils.logging import get_logger
+
+
+logger = get_logger(__name__, level="INFO")
 
 
 def load_config(root_dir: Path) -> dict[str, Any]:
     """Load analysis configuration from the project config file."""
     config_path = root_dir / "configs" / "model_test.json"
+    logger.info("Loading analysis config from %s", config_path)
     return pm.config_setup(root_dir, config_path)
 
 
@@ -37,6 +42,7 @@ def load_preprocessed_cache(
     preprocess_path = paths["preprocess"]
 
     if not meta_path.exists() or not preprocess_path.exists():
+        logger.info("Preprocessing cache not found at %s", paths["dir"])
         return None
 
     with meta_path.open("rb") as file_obj:
@@ -44,7 +50,7 @@ def load_preprocessed_cache(
     with preprocess_path.open("rb") as file_obj:
         preprocess_tables = pickle.load(file_obj)
 
-    print(f"Loaded preprocessing cache from: {paths['dir']}")
+    logger.info("Loaded preprocessing cache from %s", paths["dir"])
     return preprocess_tables, emobon_meta
 
 
@@ -64,4 +70,4 @@ def save_preprocessed_cache(
     with paths["preprocess"].open("wb") as file_obj:
         pickle.dump(preprocess_tables, file_obj)
 
-    print(f"Saved preprocessing cache to: {cache_dir}")
+    logger.info("Saved preprocessing cache to %s", cache_dir)

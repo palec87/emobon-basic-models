@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from mgnify_methods.utils.logging import get_logger
+
 from emobon_models.modeling_evaluation import (
     default_plot_output_dir,
     evaluate_train_test_splits,
@@ -19,6 +21,9 @@ from emobon_models.modeling_evaluation import (
     top_taxa_for_plotting,
     write_summary_report,
 )
+
+
+logger = get_logger(__name__, level="INFO")
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +75,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Run artifact-based split evaluation and plot generation."""
+    logger.info("Starting model evaluation workflow")
     args = parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -79,6 +85,7 @@ def main() -> None:
         run_id=args.run_id,
         experiment_id=args.experiment_id,
     )
+    logger.info("Evaluating MLflow run at %s", run_dir)
 
     artifacts = load_run_artifacts(run_dir)
     split_report = evaluate_train_test_splits(artifacts.fold_metrics)
@@ -87,6 +94,7 @@ def main() -> None:
 
     output_dir = args.output_dir or default_plot_output_dir(repo_root)
     output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Writing evaluation artifacts to %s", output_dir)
 
     split_report["fold_table"].to_csv(
         output_dir / "split_table.csv",
@@ -132,6 +140,7 @@ def main() -> None:
         split_report=split_report,
         long_predictions=long_predictions,
     )
+    logger.info("Evaluation workflow complete")
 
     print(f"Evaluation run ID: {artifacts.run_id}")
     print(f"Evaluation outputs saved to: {output_dir}")

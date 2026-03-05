@@ -58,7 +58,7 @@
   },
   "feature": "observatory ID",
   "modeling": {
-    "model_type": "ridge",
+    "model_type": "random_forest",
     "metadata_cols": [
       "observatory ID",
       "month name",
@@ -113,9 +113,40 @@
       "random_state": null,
       "selection": "cyclic"
     },
+    "tuning": {
+      "enabled": true,
+      "method": "grid_search",
+      "scoring": "neg_mean_squared_error",
+      "n_jobs": -1,
+      "refit": true,
+      "error_score": "raise",
+      "verbose": 0,
+      "inner_cv_folds": 3,
+      "max_candidates": 10,
+      "grids": {
+        "random_forest": {
+          "n_estimators": [500, 1000],
+          "max_depth": [null, 10],
+          "min_samples_leaf": [1, 2]
+        },
+        "ridge": {
+          "alpha": [0.1, 1.0, 5.0],
+          "fit_intercept": [true, false]
+        },
+        "pls": {
+          "n_components": [5, 10, 15],
+          "max_iter": [1000, 2000]
+        },
+        "elasticnet": {
+          "alpha": [0.5, 1.0, 2.0],
+          "l1_ratio": [0.05, 0.2, 0.5],
+          "max_iter": [1000, 2000]
+        }
+      }
+    },
     "mlflow": {
       "tracking_uri": null,
-      "experiment_name": "emobon-ridge-loocv",
+      "experiment_name": "emobon-rf-loocv",
       "run_name": "filtered_metadata"
     }
   },
