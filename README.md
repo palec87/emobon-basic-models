@@ -34,7 +34,11 @@ make dev-install
 make test
 ```
 
-## 2. Config and Script Structure (Brief)
+## 2. Example NB
+
+The essence of the package is demonstrated in the `nbs/teaching_example.ipynb`, where EMO-BON data are loaded, preprocessed and model fitted. The rest of the package lies in the LOOCV strategy, logging and hyperparameter tuning.
+
+## 3. Config and Script Structure (Brief)
 
 ### Main config file
 
@@ -72,7 +76,7 @@ uv run python scripts/model_testing.py
 uv run python scripts/model_evaluation.py --experiment-id <EXPERIMENT_ID>
 ```
 
-## 3. Where to Find Evaluation Scores
+## 4. Where to Find Evaluation Scores
 
 ### MLflow run outputs (`mlruns/`)
 

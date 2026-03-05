@@ -209,4 +209,4 @@ __marimo__/
 .history/
 outputs/
 mlruns/
-nbs/
+nbs/model_testing.ipynb
