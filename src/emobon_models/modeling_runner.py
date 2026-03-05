@@ -3,6 +3,8 @@
 from pathlib import Path
 import tempfile
 from typing import Any
+from urllib.parse import unquote
+from urllib.parse import urlparse
 
 import numpy as np
 import pandas as pd
@@ -128,6 +130,56 @@ def _get_mlflow_module() -> Any:
     return mlflow
 
 
+def _resolve_mlflow_tracking_uri(config_uri: str | None) -> str:
+    """Return a safe tracking URI for MLflow on local environments."""
+    if not config_uri:
+        default_dir = Path.cwd() / "mlruns"
+        return default_dir.resolve().as_uri()
+
+    if len(config_uri) > 1 and config_uri[1:3] == ":\\":
+        return Path(config_uri).resolve().as_uri()
+
+    parsed = urlparse(config_uri)
+    if parsed.scheme in {
+        "http",
+        "https",
+        "sqlite",
+        "postgresql",
+        "mysql",
+        "mssql",
+    }:
+        return config_uri
+
+    if parsed.scheme and parsed.scheme != "file":
+        return config_uri
+
+    if parsed.scheme == "":
+        return Path(config_uri).resolve().as_uri()
+
+    decoded_path = unquote(parsed.path)
+    if not decoded_path:
+        return (Path.cwd() / "mlruns").resolve().as_uri()
+
+    if decoded_path.startswith("/") and len(decoded_path) > 2:
+        if decoded_path[2:3] == ":":
+            decoded_path = decoded_path[1:]
+
+    return Path(decoded_path).resolve().as_uri()
+
+
+def _tracking_uri_to_local_dir(tracking_uri: str) -> Path | None:
+    """Convert file-based tracking URI to local directory path."""
+    parsed = urlparse(tracking_uri)
+    if parsed.scheme != "file":
+        return None
+
+    decoded_path = unquote(parsed.path)
+    if decoded_path.startswith("/") and len(decoded_path) > 2:
+        if decoded_path[2:3] == ":":
+            decoded_path = decoded_path[1:]
+    return Path(decoded_path)
+
+
 def _write_artifacts(
     temp_dir: Path,
     fold_metrics: pd.DataFrame,
@@ -158,8 +210,11 @@ def run_group_loocv_with_mlflow(
         raise ValueError(msg)
 
     mlflow = _get_mlflow_module()
-    if config.mlflow_tracking_uri:
-        mlflow.set_tracking_uri(config.mlflow_tracking_uri)
+    tracking_uri = _resolve_mlflow_tracking_uri(config.mlflow_tracking_uri)
+    tracking_dir = _tracking_uri_to_local_dir(tracking_uri)
+    if tracking_dir is not None:
+        tracking_dir.mkdir(parents=True, exist_ok=True)
+    mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(config.mlflow_experiment_name)
 
     fold_metrics_rows: list[dict[str, float | int | str]] = []

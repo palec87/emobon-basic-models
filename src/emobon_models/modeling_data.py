@@ -38,6 +38,36 @@ def _drop_duplicate_samples(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.loc[~frame.index.duplicated(keep="first")]
 
 
+def _normalize_sample_labels(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize index and column labels to stripped string identifiers."""
+    normalized = frame.copy()
+    normalized.index = normalized.index.map(lambda value: str(value).strip())
+    normalized.columns = normalized.columns.map(
+        lambda value: str(value).strip()
+    )
+    return normalized
+
+
+def _align_abundance_by_samples(
+    metadata: pd.DataFrame,
+    abundance: pd.DataFrame,
+) -> pd.DataFrame:
+    """Align abundance orientation so sample identifiers are on index."""
+    index_overlap = metadata.index.intersection(abundance.index)
+    if not index_overlap.empty:
+        return abundance
+
+    column_overlap = metadata.index.intersection(abundance.columns)
+    if not column_overlap.empty:
+        return abundance.transpose(copy=False)
+
+    msg = (
+        "No shared sample identifiers between metadata index and "
+        "abundance index or columns"
+    )
+    raise ValueError(msg)
+
+
 def _filter_missing_metadata_columns(
     metadata: pd.DataFrame,
     missing_column_threshold: float,
@@ -60,7 +90,11 @@ def prepare_modeling_dataset(
 ) -> ModelingDataset:
     """Align metadata and abundance tables and apply modeling filters."""
     metadata = _with_sample_index(metadata_df, config.sample_id_column)
-    abundance = _with_sample_index(abundance_df, config.sample_id_column)
+    abundance = abundance_df.copy()
+
+    metadata = _normalize_sample_labels(metadata)
+    abundance = _normalize_sample_labels(abundance)
+    abundance = _align_abundance_by_samples(metadata, abundance)
 
     metadata = _drop_duplicate_samples(metadata)
     abundance = _drop_duplicate_samples(abundance)

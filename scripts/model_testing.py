@@ -5,81 +5,26 @@ preprocessed tables to avoid recomputing expensive preprocessing steps.
 """
 
 from pathlib import Path
-import pickle
 from typing import Any
+from utils.io import (
+    load_config,
+    load_preprocessed_cache,
+    save_preprocessed_cache,
+)
 
 import mgnify_methods.paper_modules as pm
 from mgnify_methods.metacomp.transforms import apply_transform_method
-from mgnify_methods.taxonomy import aggregate_by_taxonomic_level
-from mgnify_methods.taxonomy import pivot_taxonomic_data
-from mgnify_methods.taxonomy import prevalence_cutoff_abund
-from mgnify_methods.taxonomy import remove_singletons_per_sample
-
+from mgnify_methods.taxonomy import (
+    aggregate_by_taxonomic_level,
+    pivot_taxonomic_data, prevalence_cutoff_abund,
+    remove_singletons_per_sample
+)
 from emobon_models.modeling_config import modeling_config_from_analysis
 from emobon_models.modeling_runner import run_group_loocv_with_mlflow
+from utils.filter import filter_lineage_by_string
 
-
-def load_config(root_dir: Path) -> dict[str, Any]:
-    """Load analysis configuration from the project config file."""
-    config_path = root_dir / "configs" / "model_test.json"
-    return pm.config_setup(root_dir, config_path)
-
-
-def cache_file_paths(
-    root_dir: Path,
-    config: dict[str, Any],
-) -> dict[str, Path]:
-    """Build file paths used for caching preprocessed outputs."""
-    cache_dir_name = config.get(
-        "output",
-        {},
-    ).get("cache_dir", "analysis_cache")
-    cache_dir = root_dir / cache_dir_name / "model_testing"
-    return {
-        "dir": cache_dir,
-        "meta": cache_dir / "emobon_meta.pkl",
-        "preprocess": cache_dir / "preprocess_tables.pkl",
-    }
-
-
-def load_preprocessed_cache(
-    root_dir: Path,
-    config: dict[str, Any],
-) -> tuple[dict[str, Any], Any] | None:
-    """Load cached preprocessed tables and metadata if available."""
-    paths = cache_file_paths(root_dir, config)
-    meta_path = paths["meta"]
-    preprocess_path = paths["preprocess"]
-
-    if not meta_path.exists() or not preprocess_path.exists():
-        return None
-
-    with meta_path.open("rb") as file_obj:
-        emobon_meta = pickle.load(file_obj)
-    with preprocess_path.open("rb") as file_obj:
-        preprocess_tables = pickle.load(file_obj)
-
-    print(f"Loaded preprocessing cache from: {paths['dir']}")
-    return preprocess_tables, emobon_meta
-
-
-def save_preprocessed_cache(
-    root_dir: Path,
-    config: dict[str, Any],
-    preprocess_tables: dict[str, Any],
-    emobon_meta: Any,
-) -> None:
-    """Persist preprocessed outputs to cache files."""
-    paths = cache_file_paths(root_dir, config)
-    cache_dir = paths["dir"]
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    with paths["meta"].open("wb") as file_obj:
-        pickle.dump(emobon_meta, file_obj)
-    with paths["preprocess"].open("wb") as file_obj:
-        pickle.dump(preprocess_tables, file_obj)
-
-    print(f"Saved preprocessing cache to: {cache_dir}")
+from mgnify_methods.utils.logging import get_logger
+logger = get_logger(__name__, level="INFO")
 
 
 def build_preprocessed_tables(
@@ -100,17 +45,26 @@ def build_preprocessed_tables(
 
     abundance_table = pivot_taxonomic_data(abundance_table)
 
-    abundance_table_beta = remove_singletons_per_sample(
+    abundance_table = remove_singletons_per_sample(
         abundance_table,
         skip_columns=0,
     )
-    abundance_table_beta = prevalence_cutoff_abund(
-        abundance_table_beta,
+    logger.info(f'before filtering: {abundance_table.shape}')
+    # remove unclassified sequences, such as 'sk__Archaea;k__;p__;c__;o__;f__;g__;s__'
+    string_to_filter = config["taxonomy"]["indicators"][tax_level] + ';'
+    abundance_table = filter_lineage_by_string(
+        abundance_table,
+        string_to_filter,
+    )
+    logger.info(f'after filtering: {abundance_table.shape}')
+
+    abundance_table = prevalence_cutoff_abund(
+        abundance_table,
         percent=config["preprocessing"]["prevalence_cutoff"],
         skip_columns=0,
     )
 
-    preprocess_tables: dict[str, Any] = {"emobon": abundance_table_beta}
+    preprocess_tables: dict[str, Any] = {"emobon": abundance_table}
 
     if config["transform"]["enabled"]:
         transformed_tables: dict[str, Any] = {}
@@ -152,6 +106,9 @@ def main() -> None:
 
     modeling_config = modeling_config_from_analysis(config)
     abundance_for_model = preprocess_tables["emobon"]
+
+    # filter metadata manually
+    emobon_meta = emobon_meta[config['modeling']['metadata_cols']]
 
     modeling_results = run_group_loocv_with_mlflow(
         metadata_df=emobon_meta,
