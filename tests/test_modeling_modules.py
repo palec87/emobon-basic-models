@@ -542,6 +542,8 @@ def test_run_inverse_group_loocv_with_mlflow(tmp_path: Path) -> None:
     assert "pred__temperature" in preds_df.columns
     assert "true__season" in preds_df.columns
     assert "pred__season" in preds_df.columns
+    assert "true__study_tag" not in preds_df.columns
+    assert "pred__study_tag" not in preds_df.columns
 
     metrics_df = result["fold_metrics"]
     assert isinstance(metrics_df, pd.DataFrame)

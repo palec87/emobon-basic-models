@@ -17,10 +17,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import confusion_matrix
 
 from mgnify_methods.utils.logging import get_logger
 
@@ -419,6 +421,102 @@ def _plot_categorical_accuracy(
     return True
 
 
+def _safe_name(value: str) -> str:
+    """Convert arbitrary target name into a filesystem-safe token."""
+    safe = re.sub(r"[^0-9A-Za-z._-]+", "_", value.strip())
+    safe = safe.strip("_")
+    return safe or "target"
+
+
+def _plot_categorical_confusion_matrices(
+    long_df: pd.DataFrame,
+    output_dir: Path,
+) -> list[Path]:
+    """Plot one confusion matrix per categorical target column.
+
+    Parameters
+    ----------
+    long_df:
+        Long prediction table containing ``target``, ``y_true``, ``y_pred``,
+        and ``is_numeric`` columns.
+    output_dir:
+        Destination directory where confusion matrix PNG files are saved.
+
+    Returns
+    -------
+    list[Path]
+        List of generated output file paths.
+    """
+    plt = _get_pyplot_module()
+    output_paths: list[Path] = []
+
+    cat_df = long_df[~long_df["is_numeric"]].copy()
+    if cat_df.empty:
+        return output_paths
+
+    for target, target_df in cat_df.groupby("target", dropna=False):
+        valid = target_df[
+            target_df["y_true"].notna() & target_df["y_pred"].notna()
+        ]
+        if valid.empty:
+            continue
+
+        y_true = valid["y_true"].astype(str).to_numpy()
+        y_pred = valid["y_pred"].astype(str).to_numpy()
+        labels = sorted(set(y_true).union(set(y_pred)))
+        if not labels:
+            continue
+
+        cm = confusion_matrix(y_true, y_pred, labels=labels)
+        cm_float = cm.astype(float)
+        row_sums = cm_float.sum(axis=1, keepdims=True)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cm_norm = np.divide(
+                cm_float,
+                row_sums,
+                out=np.zeros_like(cm_float),
+                where=row_sums > 0,
+            )
+
+        side = max(6.0, min(14.0, 0.45 * len(labels) + 4.0))
+        fig, ax = plt.subplots(figsize=(side, side))
+        im = ax.imshow(cm_norm, cmap="Blues", vmin=0.0, vmax=1.0)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04,
+                     label="Row-normalized")
+
+        ax.set_xticks(np.arange(len(labels)))
+        ax.set_yticks(np.arange(len(labels)))
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.set_yticklabels(labels)
+        ax.set_xlabel("Predicted label")
+        ax.set_ylabel("True label")
+        ax.set_title(f"Confusion Matrix: {target}")
+
+        # Annotate with raw counts for easier interpretation.
+        threshold = cm.max() / 2.0 if cm.size else 0.0
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                text_color = "white" if cm[i, j] > threshold else "black"
+                ax.text(
+                    j,
+                    i,
+                    f"{cm[i, j]}",
+                    ha="center",
+                    va="center",
+                    color=text_color,
+                    fontsize=8,
+                )
+
+        fig.tight_layout()
+        target_name = _safe_name(str(target))
+        output_path = output_dir / f"confusion_matrix_{target_name}.png"
+        fig.savefig(output_path, dpi=150)
+        plt.close(fig)
+        output_paths.append(output_path)
+
+    return output_paths
+
+
 def _plot_feature_importances(
     feature_importances: pd.DataFrame,
     output_path: Path,
@@ -591,6 +689,10 @@ def main() -> None:
         per_target_acc,
         output_dir / "categorical_accuracy_by_target.png",
     )
+    confusion_matrix_paths = _plot_categorical_confusion_matrices(
+        long_df,
+        output_dir,
+    )
 
     _plot_feature_importances(
         feature_importances,
@@ -635,6 +737,10 @@ def main() -> None:
     print(f"Generated numeric scatter: {wrote_numeric_scatter}")
     print(f"Generated numeric residual plot: {wrote_residuals}")
     print(f"Generated categorical accuracy plot: {wrote_cat_acc}")
+    print(
+        "Generated categorical confusion matrices: "
+        f"{len(confusion_matrix_paths)}"
+    )
 
 
 if __name__ == "__main__":

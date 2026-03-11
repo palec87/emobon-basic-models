@@ -244,32 +244,45 @@ def _inverse_fold_metrics(
     """
     metrics: dict[str, float] = {}
 
-    if y_true_num is not None and y_pred_num is not None:
+    y_pred_num_arr: np.ndarray | None = None
+    y_pred_cat_arr: np.ndarray | None = None
+
+    if y_pred_num is not None:
+        y_pred_num_arr = np.asarray(y_pred_num)
+        if y_pred_num_arr.ndim == 1:
+            y_pred_num_arr = y_pred_num_arr.reshape(-1, 1)
+
+    if y_pred_cat is not None:
+        y_pred_cat_arr = np.asarray(y_pred_cat)
+        if y_pred_cat_arr.ndim == 1:
+            y_pred_cat_arr = y_pred_cat_arr.reshape(-1, 1)
+
+    if y_true_num is not None and y_pred_num_arr is not None:
         valid_mask = ~y_true_num.isna().any(axis=1)
         if valid_mask.any():
             metrics["mae"] = float(
                 mean_absolute_error(
                     y_true_num.loc[valid_mask].to_numpy(),
-                    y_pred_num[valid_mask.values],
+                    y_pred_num_arr[valid_mask.values],
                 )
             )
             metrics["rmse"] = float(
                 np.sqrt(
                     mean_squared_error(
                         y_true_num.loc[valid_mask].to_numpy(),
-                        y_pred_num[valid_mask.values],
+                        y_pred_num_arr[valid_mask.values],
                     )
                 )
             )
 
-    if y_true_cat is not None and y_pred_cat is not None:
+    if y_true_cat is not None and y_pred_cat_arr is not None:
         y_true_arr = y_true_cat.to_numpy()
         n_targets = y_true_arr.shape[1]
         per_target_acc: list[float] = []
         per_target_f1: list[float] = []
         for j in range(n_targets):
             col_true = y_true_arr[:, j]
-            col_pred = y_pred_cat[:, j]
+            col_pred = y_pred_cat_arr[:, j]
             valid = pd.notna(col_true)
             if valid.any():
                 per_target_acc.append(
@@ -522,6 +535,20 @@ def run_inverse_group_loocv_with_mlflow(
     # Invert direction: X = abundance, y = aligned metadata.
     X_full = dataset.abundance
     y_full = dataset.metadata
+    if config.feature_column in y_full.columns:
+        y_full = y_full.drop(columns=[config.feature_column])
+        logger.info(
+            "Excluded grouping feature '%s' from inverse targets",
+            config.feature_column,
+        )
+
+    if y_full.shape[1] == 0:
+        msg = (
+            "No metadata target columns remain after excluding "
+            f"feature column '{config.feature_column}'"
+        )
+        raise ValueError(msg)
+
     numeric_cols, categorical_cols = _split_metadata_by_dtype(y_full)
     logger.info(
         "Inverse targets: %d numeric columns, %d categorical columns",
@@ -603,7 +630,9 @@ def run_inverse_group_loocv_with_mlflow(
                 y_true_num = y_full.loc[test_mask, numeric_cols]
                 reg_pipeline = _build_regression_pipeline(config)
                 reg_pipeline.fit(X_train, y_train_num)
-                y_pred_num = reg_pipeline.predict(X_test)
+                y_pred_num = np.asarray(reg_pipeline.predict(X_test))
+                if y_pred_num.ndim == 1:
+                    y_pred_num = y_pred_num.reshape(-1, 1)
 
             if categorical_cols:
                 y_train_cat = _impute_categorical_targets(
@@ -612,7 +641,9 @@ def run_inverse_group_loocv_with_mlflow(
                 y_true_cat = y_full.loc[test_mask, categorical_cols]
                 cls_pipeline = _build_classification_pipeline(config)
                 cls_pipeline.fit(X_train, y_train_cat)
-                y_pred_cat = cls_pipeline.predict(X_test)
+                y_pred_cat = np.asarray(cls_pipeline.predict(X_test))
+                if y_pred_cat.ndim == 1:
+                    y_pred_cat = y_pred_cat.reshape(-1, 1)
 
             metrics = _inverse_fold_metrics(
                 y_true_num, y_pred_num, y_true_cat, y_pred_cat

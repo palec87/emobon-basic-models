@@ -53,7 +53,7 @@
     }
   },
   "preprocessing": {
-    "prevalence_cutoff": 4,
+    "prevalence_cutoff": 0.1,
     "dropna": false
   },
   "feature": "observatory ID",
@@ -61,7 +61,7 @@
     "model_type": "random_forest",
     "metadata_cols": [
       "observatory ID",
-      "month name",
+      "season",
       "tidal stage",
       "environmental package",
       "sampling depth (m)",
@@ -74,11 +74,11 @@
     "sample_id_column": null,
     "missing_column_threshold": 0.2,
     "random_forest": {
-      "n_estimators": 700,
+      "n_estimators": 5000,
       "random_state": 42,
       "n_jobs": -1,
-      "max_depth": null,
-      "min_samples_leaf": 1
+      "max_depth": 25,
+      "min_samples_leaf": 3
     },
     "ridge": {
       "alpha": 1.0,
