@@ -18,6 +18,11 @@ ModelType = Literal[
     "elasticnet",
 ]
 
+ClassificationModelType = Literal[
+    "random_forest",
+    "logistic_regression",
+]
+
 
 @dataclass(slots=True)
 class ModelingConfig:
@@ -39,6 +44,11 @@ class ModelingConfig:
     ridge_params: dict[str, Any] | None = None
     pls_params: dict[str, Any] | None = None
     elasticnet_params: dict[str, Any] | None = None
+
+    # Inverse model (taxonomy -> metadata) classification configuration.
+    classification_model_type: ClassificationModelType = "random_forest"
+    random_forest_classifier_params: dict[str, Any] | None = None
+    logistic_regression_params: dict[str, Any] | None = None
 
     tuning_enabled: bool = False
     tuning_method: str = "grid_search"
@@ -74,6 +84,19 @@ def _validate_model_type(model_type: str) -> ModelType:
     }
     if model_type not in allowed:
         msg = f"Unsupported model_type '{model_type}'"
+        raise ValueError(msg)
+    return model_type  # type: ignore[return-value]
+
+
+def _validate_classification_model_type(
+    model_type: str,
+) -> ClassificationModelType:
+    """Validate and return supported classification model type name."""
+    allowed = {"random_forest", "logistic_regression"}
+    if model_type not in allowed:
+        msg = (
+            f"Unsupported classification_model_type '{model_type}'"
+        )
         raise ValueError(msg)
     return model_type  # type: ignore[return-value]
 
@@ -142,6 +165,19 @@ def modeling_config_from_analysis(config: Mapping[str, Any]) -> ModelingConfig:
     ridge_params = _mapping_to_dict(modeling_section.get("ridge"))
     pls_params = _mapping_to_dict(modeling_section.get("pls"))
     elasticnet_params = _mapping_to_dict(modeling_section.get("elasticnet"))
+    classification_model_type = _validate_classification_model_type(
+        str(
+            modeling_section.get(
+                "classification_model_type", "random_forest"
+            )
+        )
+    )
+    rfc_params = _mapping_to_dict(
+        modeling_section.get("random_forest_classifier")
+    )
+    lr_params = _mapping_to_dict(
+        modeling_section.get("logistic_regression")
+    )
     tuning_section = _mapping_to_dict(modeling_section.get("tuning"))
     mlflow_section = _mapping_to_dict(modeling_section.get("mlflow"))
 
@@ -238,6 +274,9 @@ def modeling_config_from_analysis(config: Mapping[str, Any]) -> ModelingConfig:
         ridge_params=ridge_full,
         pls_params=pls_full,
         elasticnet_params=elasticnet_full,
+        classification_model_type=classification_model_type,
+        random_forest_classifier_params=rfc_params or None,
+        logistic_regression_params=lr_params or None,
         tuning_enabled=tuning_enabled,
         tuning_method=tuning_method,
         tuning_scoring=tuning_scoring,

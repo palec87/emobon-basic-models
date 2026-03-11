@@ -21,6 +21,8 @@ from mgnify_methods.taxonomy import (
 )
 from emobon_models.modeling_config import modeling_config_from_analysis
 from emobon_models.modeling_runner import run_group_loocv_with_mlflow
+from emobon_models.modeling_runner_inverse import run_inverse_group_loocv_with_mlflow
+
 from utils.filter import filter_lineage_by_string
 
 from mgnify_methods.utils.logging import get_logger
@@ -89,7 +91,7 @@ def main() -> None:
     """Execute cache-aware preprocessing and group-LOOCV modeling."""
     logger.info("Starting model testing workflow")
     root_dir = Path(__file__).resolve().parent.parent
-    config = load_config(root_dir, 'model_test')
+    config = load_config(root_dir, 'model_test_inverse')
     logger.info("Configuration loaded")
 
     cached = load_preprocessed_cache(root_dir, config)
@@ -118,14 +120,14 @@ def main() -> None:
     emobon_meta = emobon_meta[config['modeling']['metadata_cols']]
     logger.info("Filtered metadata columns to shape: %s", emobon_meta.shape)
 
-    modeling_results = run_group_loocv_with_mlflow(
+    modeling_results = run_inverse_group_loocv_with_mlflow(
         metadata_df=emobon_meta,
         abundance_df=abundance_for_model,
         config=modeling_config,
     )
 
     print("Modeling summary metrics:")
-    print(modeling_results["summary_metrics"])
+    print(modeling_results)
     logger.info("Model testing workflow completed")
 
 

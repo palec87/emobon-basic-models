@@ -9,6 +9,9 @@ from emobon_models.modeling_evaluation import (
     to_long_predictions
 )
 from emobon_models.modeling_runner import run_group_loocv_with_mlflow
+from emobon_models.modeling_runner_inverse import (
+    run_inverse_group_loocv_with_mlflow,
+)
 
 __version__ = "0.1.0"
 
@@ -21,4 +24,5 @@ __all__ = [
     "evaluate_train_test_splits",
     "to_long_predictions",
     "run_group_loocv_with_mlflow",
+    "run_inverse_group_loocv_with_mlflow",
 ]

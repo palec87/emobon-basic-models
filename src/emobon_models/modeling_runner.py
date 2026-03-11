@@ -167,6 +167,10 @@ def _fit_pipeline_with_optional_tuning(
 ) -> tuple[Pipeline, dict[str, Any], float | None, pd.DataFrame | None]:
     """Fit pipeline directly or through nested GridSearchCV."""
     pipeline = _build_pipeline(metadata, config)
+    logger.info("FITTING Training X and y")
+    logger.info(f"{X_train.head()}")
+    logger.info(f"{y_train.head()} with groups")
+    logger.info(f"{train_groups.head()}")
     if not config.tuning_enabled:
         logger.info("Tuning disabled; fitting pipeline directly")
         pipeline.fit(X_train, y_train)

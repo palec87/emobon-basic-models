@@ -1,0 +1,162 @@
+{
+  "output": {
+    "use_timestamp": true,
+    "cache_dir": "analysis_cache"
+  },
+  "taxonomy": {
+    "ranks": [
+      "superkingdom",
+      "kingdom",
+      "phylum",
+      "class",
+      "order",
+      "family",
+      "genus",
+      "species"
+    ],
+    "indicators": {
+      "superkingdom": "sk__",
+      "kingdom": "k__",
+      "phylum": "p__",
+      "class": "c__",
+      "order": "o__",
+      "family": "f__",
+      "genus": "g__",
+      "species": "s__"
+    },
+    "analysis_level": "phylum"
+  },
+  "samples": {
+    "sample_type": "prok"
+  },
+  "precompute": {
+    "loading": true,
+    "saving": true,
+    "tag": "small"
+  },
+  "transform": {
+    "enabled": true,
+    "method": "clr",
+    "params": {
+      "pseudo_count": 1e-09
+    },
+    "method_params": {
+      "alr": {
+        "reference_feature": "taxon_1"
+      },
+      "ilr": {
+        "basis": "sbp"
+      },
+      "plr": {
+        "lambda": 0.5
+      }
+    }
+  },
+  "preprocessing": {
+    "prevalence_cutoff": 4,
+    "dropna": false
+  },
+  "feature": "observatory ID",
+  "modeling": {
+    "model_type": "random_forest",
+    "metadata_cols": [
+      "observatory ID",
+      "month name",
+      "tidal stage",
+      "environmental package",
+      "sampling depth (m)",
+      "chlorophyll (ug/l)",
+      "sea subsurface salinity (PSU)",
+      "sea subsurface temperature (C)",
+      "sea surface salinity (PSU)",
+      "sea surface temperature (C)"
+    ],
+    "sample_id_column": null,
+    "missing_column_threshold": 0.2,
+    "random_forest": {
+      "n_estimators": 700,
+      "random_state": 42,
+      "n_jobs": -1,
+      "max_depth": null,
+      "min_samples_leaf": 1
+    },
+    "ridge": {
+      "alpha": 1.0,
+      "fit_intercept": false,
+      "copy_X": true,
+      "max_iter": null,
+      "tol": 0.0001,
+      "solver": "auto",
+      "positive": false,
+      "random_state": null
+    },
+    "pls": {
+      "n_components": 15,
+      "scale": true,
+      "max_iter": 2000,
+      "tol": 0.000001,
+      "copy": true
+    },
+    "elasticnet": {
+      "alpha": 2.0,
+      "l1_ratio": 0.05,
+      "fit_intercept": false,
+      "copy_X": true,
+      "max_iter": 2000,
+      "tol": 0.0001,
+      "warm_start": false,
+      "random_state": null,
+      "selection": "cyclic"
+    },
+    "tuning": {
+      "enabled": true,
+      "method": "grid_search",
+      "scoring": "neg_mean_squared_error",
+      "n_jobs": -1,
+      "refit": true,
+      "error_score": "raise",
+      "verbose": 0,
+      "inner_cv_folds": 3,
+      "max_candidates": 10,
+      "grids": {
+        "random_forest": {
+          "n_estimators": [500, 1000],
+          "max_depth": [null, 10],
+          "min_samples_leaf": [1, 2]
+        },
+        "ridge": {
+          "alpha": [0.1, 1.0, 5.0],
+          "fit_intercept": [true, false]
+        },
+        "pls": {
+          "n_components": [5, 10, 15],
+          "max_iter": [1000, 2000]
+        },
+        "elasticnet": {
+          "alpha": [0.5, 1.0, 2.0],
+          "l1_ratio": [0.05, 0.2, 0.5],
+          "max_iter": [1000, 2000]
+        }
+      }
+    },
+    "mlflow": {
+      "tracking_uri": null,
+      "experiment_name": "emobon-rf-loocv",
+      "run_name": "filtered_metadata"
+    }
+  },
+  "plots": {
+    "reads_histogram": false,
+    "taxonomic_overlap_venn": true,
+    "rarefaction_curves": true,
+    "rarefaction_mean_std": true,
+    "rarefaction_mean_ci": true,
+    "rarefaction_individual": false,
+    "alpha_diversity": true,
+    "beta_diversity_pcoa": true,
+    "taxa_prevalence_violin": true,
+    "feature_rarefaction": true,
+    "save_figures": true,
+    "dpi": 300
+  }
+}

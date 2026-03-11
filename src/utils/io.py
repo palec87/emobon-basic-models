@@ -8,9 +8,9 @@ from mgnify_methods.utils.logging import get_logger
 logger = get_logger(__name__, level="INFO")
 
 
-def load_config(root_dir: Path) -> dict[str, Any]:
+def load_config(root_dir: Path, name: str) -> dict[str, Any]:
     """Load analysis configuration from the project config file."""
-    config_path = root_dir / "configs" / "model_test.json"
+    config_path = root_dir / "configs" / f"{name}.json"
     logger.info("Loading analysis config from %s", config_path)
     return pm.config_setup(root_dir, config_path)
 
