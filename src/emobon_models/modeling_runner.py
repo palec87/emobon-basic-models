@@ -74,6 +74,47 @@ def _build_preprocessor(
     )
 
 
+def _log_metadata_once_before_cv(
+    metadata: pd.DataFrame,
+    config: ModelingConfig,
+) -> None:
+    """Log metadata and one transformed preview once before CV starts."""
+    logger.info("Metadata before preprocessor shape=%s", metadata.shape)
+    logger.info(
+        "Metadata before preprocessor columns=%s",
+        list(metadata.columns),
+    )
+    logger.info(
+        "Metadata before preprocessor dtypes=%s",
+        {column: str(dtype) for column, dtype in metadata.dtypes.items()},
+    )
+    logger.info(
+        "Metadata before preprocessor head:\n%s",
+        metadata.head().to_string(),
+    )
+
+    preprocessor = _build_preprocessor(metadata, config)
+    transformed = preprocessor.fit_transform(metadata)
+    feature_names = preprocessor.get_feature_names_out().tolist()
+    transformed_df = pd.DataFrame(
+        transformed,
+        columns=feature_names,
+        index=metadata.index,
+    )
+    logger.info(
+        "Metadata after preprocessor shape=%s",
+        transformed_df.shape,
+    )
+    logger.info(
+        "Metadata after preprocessor columns(first_30)=%s",
+        feature_names[:30],
+    )
+    logger.info(
+        "Metadata after preprocessor head:\n%s",
+        transformed_df.head().to_string(),
+    )
+
+
 def _build_pipeline(
     metadata: pd.DataFrame,
     config: ModelingConfig,
@@ -168,9 +209,11 @@ def _fit_pipeline_with_optional_tuning(
     """Fit pipeline directly or through nested GridSearchCV."""
     pipeline = _build_pipeline(metadata, config)
     logger.info("FITTING Training X and y")
-    logger.info(f"{X_train.head()}")
-    logger.info(f"{y_train.head()} with groups")
-    logger.info(f"{train_groups.head()}")
+    logger.info("Training abundance preview:\n%s", y_train.head().to_string())
+    logger.info(
+        "Training groups preview:\n%s",
+        train_groups.head().to_string(),
+    )
     if not config.tuning_enabled:
         logger.info("Tuning disabled; fitting pipeline directly")
         pipeline.fit(X_train, y_train)
@@ -427,6 +470,7 @@ def run_group_loocv_with_mlflow(
         abundance_df=abundance_df,
         config=config,
     )
+    _log_metadata_once_before_cv(dataset.metadata, config)
 
     splitter = _group_loocv_masks(dataset.groups)
     if not splitter:

@@ -131,9 +131,64 @@ def _build_abundance_preprocessor() -> Pipeline:
     return Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
+            # ("scaler", StandardScaler()),
         ]
     )
+
+
+def _log_inverse_metadata_once_before_cv(
+    metadata_targets: pd.DataFrame,
+    numeric_cols: list[str],
+    categorical_cols: list[str],
+) -> None:
+    """Log inverse metadata targets once before CV starts."""
+    logger.info(
+        "Inverse metadata targets before preprocessing shape=%s",
+        metadata_targets.shape,
+    )
+    logger.info(
+        "Inverse metadata targets before preprocessing columns=%s",
+        list(metadata_targets.columns),
+    )
+    logger.info(
+        "Inverse metadata targets before preprocessing dtypes=%s",
+        {
+            column: str(dtype)
+            for column, dtype in metadata_targets.dtypes.items()
+        },
+    )
+    logger.info(
+        "Inverse metadata targets before preprocessing head:\n%s",
+        metadata_targets.head().to_string(),
+    )
+
+    if numeric_cols:
+        imputed_numeric = _impute_numeric_targets(
+            metadata_targets[numeric_cols]
+        )
+        logger.info(
+            "Inverse numeric metadata after preprocessing "
+            "(median-impute) shape=%s",
+            imputed_numeric.shape,
+        )
+        logger.info(
+            "Inverse numeric metadata after preprocessing head:\n%s",
+            imputed_numeric.head().to_string(),
+        )
+
+    if categorical_cols:
+        imputed_categorical = _impute_categorical_targets(
+            metadata_targets[categorical_cols]
+        )
+        logger.info(
+            "Inverse categorical metadata after preprocessing "
+            "(most-frequent-impute) shape=%s",
+            imputed_categorical.shape,
+        )
+        logger.info(
+            "Inverse categorical metadata after preprocessing head:\n%s",
+            imputed_categorical.head().to_string(),
+        )
 
 
 def _build_regression_pipeline(config: ModelingConfig) -> Pipeline:
@@ -554,6 +609,11 @@ def run_inverse_group_loocv_with_mlflow(
         "Inverse targets: %d numeric columns, %d categorical columns",
         len(numeric_cols),
         len(categorical_cols),
+    )
+    _log_inverse_metadata_once_before_cv(
+        y_full,
+        numeric_cols,
+        categorical_cols,
     )
 
     splitter = _group_loocv_masks(dataset.groups)
